@@ -1,0 +1,384 @@
+#!/bin/bash
+#=============================================================
+# cgyro
+#
+# PURPOSE:
+#  Top-level script controlling execution of CGYRO.
+#=============================================================
+
+#=============================================================
+# Syntax validity check and help message
+#
+n=$#
+
+if [ $n -eq 0 ]
+then
+  echo
+  echo "Usage:   cgyro [options]"
+  echo
+  echo "         -p <path>"
+  echo "         Set optional path to simulation directory."
+  echo "         The default path is \$CGYRO_DIR/sim."
+  echo
+  echo "TEST MODE"
+  echo
+  echo "         -i <simdir>"
+  echo "         Print acceptable MPI tasks."
+  echo
+  echo "         -t <simdir>"
+  echo "         Sanity test for INPUT data in <simdir>."
+  echo
+  echo "EXECUTE MODE"
+  echo
+  echo "         -e <simdir>"
+  echo "         Use input data in <simdir>."
+  echo
+  echo "         -n <MPI tasks>"
+  echo "         Number of MPI tasks."
+  echo
+  echo "         -nomp <threads>"
+  echo "         Number of OpenMP threads per MPI task."
+  echo
+  echo "         -numa <n>"
+  echo "         NUMAs active per node."
+  echo
+  echo "         -mpinuma <n>"
+  echo "         MPI tasks per active NUMA."
+  echo
+  echo "REGRESSION TESTING"
+  echo
+  echo "         -r"
+  echo "         Run full regression suite."
+  echo
+  echo "         -rs <case>"
+  echo "         Run specified regression case."
+  echo
+  echo "         -reset"
+  echo "         Reset regression data."
+  echo
+  echo "MPI TESTING"
+  echo
+  echo "         -m"
+  echo "         Run full MPI test suite."
+  echo
+  echo "         -ms <test>"
+  echo "         Run specified MPI test."
+  echo
+  echo "TEMPLATE GENERATION"
+  echo
+  echo "         -g"
+  echo "         List available simulation templates."
+  echo
+  echo "         -g <template>"
+  echo "         Copy <template> into simulation path."
+  echo
+  echo "UTILITIES"
+  echo
+  echo "         -h"
+  echo "         Version and platform information."
+  echo
+  echo "         -clean"
+  echo "         Clean simulation directory (all out.* and bin.* files)."
+  echo
+  echo "         -optclean"
+  echo "         Clean simulation directory except for timing files."
+  echo
+  echo "         -compress"
+  echo "         Replicate directory, but without restart or nonstandard files."
+ 
+  exit 1
+fi
+#=============================================================
+
+#=============================================================
+# Define variables for flag capture
+#
+SIMROOT=$PWD
+CGYRO_DIR=$GACODE_ROOT/cgyro
+# Default number of cores
+NPROC=1
+NOMP=1
+NUMA=0
+MPINUMA=0
+# Execute/test mode flags
+TEST_FLAG=0
+GENERATE_FLAG=0
+REGRESS_FLAG=0
+MTEST_FLAG=0
+CLEAN=0
+COMPRESS_FLAG=0
+RESET=0
+INIT_FLAG=0
+HELP_TAG=null
+SCASE=
+MCASE=
+#=============================================================
+
+#=============================================================
+# Parse command line options
+#
+while [ $# -gt 0 ] ; do
+  case "$1" in
+
+  -p) shift ; SIMROOT=$1 ;;
+
+  -e) shift ; LOCDIR=$1 ;;
+
+  -t) shift ; LOCDIR=$1 ; TEST_FLAG=1 ;;
+
+  -i) shift ; LOCDIR=$1 ; INIT_FLAG=1 ;;
+
+  -n) shift ; NPROC=$1 ;;
+
+  -nomp) shift ; NOMP=$1 ;;
+
+  -numa) shift ; NUMA=$1 ;;
+
+  -mpinuma) shift ; MPINUMA=$1 ;;
+
+  -g) shift ; LOCDIR=$1 ; GENERATE_FLAG=1 ;;
+
+  -r) REGRESS_FLAG=1 ;;
+
+  -rs) REGRESS_FLAG=1 ; shift ; SCASE=$1 ;;
+
+  -reset) RESET=1 ;;
+
+  -m) MTEST_FLAG=1 ;;
+
+  -ms) MTEST_FLAG=1 ; shift ; MCASE=$1 ;;
+
+  -h) gacode_printversion CGYRO ; exit 0 ;;
+
+  -help) shift ; HELP_TAG=$1 ;;
+
+  -clean) CLEAN=1 ;;
+  -optclean) CLEAN=2 ;;
+
+  -compress) COMPRESS_FLAG=1 ;;
+
+  *) echo "ERROR (cgyro script): unknown option $1." ; exit 1 ;;
+
+  esac
+  shift
+done
+#=============================================================
+
+if [ "$LOCDIR" == "." ]
+then
+   SIMDIR=$PWD
+   cd .. ; LOCDIR=$PWD
+else
+   SIMDIR=$SIMROOT/$LOCDIR
+fi
+
+#============================================================
+# Check for inconsistent flags:
+FLAG_SUM=$[ $EXEC_FLAG + $TEST_FLAG + $GENERATE_FLAG
+                       + $REGRESS_FLAG + $MTEST_FLAG + $INIT_FLAG ]
+if [ $FLAG_SUM -gt 1 ]
+then
+   echo "ERROR: Can only specify one of -e, -t, -i, -g, -r, -m"
+   exit 1
+fi
+#============================================================
+
+#============================================================
+# compress option
+if [ $COMPRESS_FLAG -eq 1 ]
+then
+    cgyro_compress $SIMDIR $LOCDIR
+    exit 1
+fi
+#============================================================
+
+#============================================================
+# Generate simdir if -g set, then exit.
+#
+if [ $GENERATE_FLAG -eq 1 ]
+then
+   if [ ! -f "${CGYRO_DIR}/tools/input/$LOCDIR/input.cgyro" ]
+   then
+      cat ${CGYRO_DIR}/tools/input/simdir_list
+   else
+      cp -ai ${CGYRO_DIR}/tools/input/$LOCDIR $SIMDIR
+   fi
+   exit 0
+fi
+#============================================================
+
+#============================================================
+# Do the regression test if -r set, then exit.
+#
+if [ $REGRESS_FLAG -eq 1 ]
+then
+   N2=$[ NPROC / 2 ]
+   if [ $[ NPROC - 2 * N2 ] -eq 1 ]
+   then
+      echo "ERROR: (CGYRO) For regression test, number of processors must be multiple of 2."
+      exit 1
+   fi
+   # NOMP=1 RESET=0
+   gacode_reg_do $NPROC $NOMP $RESET cgyro 1e-6 $SCASE
+   exit 0
+fi
+#============================================================
+
+#============================================================
+# Do the mpi test if -m set, then exit.
+#
+if [ $MTEST_FLAG -eq 1 ]
+then
+   if [ -z "${MCASE}" ]; then
+      MCASE="cgyro_test_alltoall cgyro_test_alltoall_nosplit cgyro_test_allreduce_4"
+   fi
+   for c in ${MCASE}; do
+      if [ -f $CGYRO_DIR/mpi_tests/$c ] ; then
+	 echo "Running MPI case: $c"
+         $GACODE_ROOT/platform/exec/exec.$GACODE_PLATFORM \
+            $SIMDIR $NPROC $CGYRO_DIR/mpi_tests/$c $NOMP $NUMA $MPINUMA
+      else
+         echo "ERROR: MPI case $c executable not found."
+         exit 1
+      fi
+   done
+   exit 0
+fi
+#============================================================
+
+#============================================================
+# Everything else must be done in $SIMDIR; so ensure existence
+# of $SIMDIR (needed at this point) and go there:
+#
+if ! gacode_sim_warn $SIMDIR
+then
+   exit 1
+fi
+
+cd $SIMDIR
+#============================================================
+
+#============================================================
+# Clean/new options
+
+CFILES="bin.* batch.out batch.err *~"
+C1FILES="out.* *gen"
+C2FILES="*egrid *equilibrium *grids *hosts *memory *rotation"
+
+if [ $CLEAN -eq 1 ] ; then
+    rm -f $CFILES $C1FILES
+    echo "INFO: (cgyro) Cleaned directory."
+    exit 1
+fi
+if [ $CLEAN -eq 2 ] ; then
+    rm -f $CFILES $C2FILES
+    echo "INFO: (cgyro) Thinned out directory."
+    exit 1
+fi
+#============================================================
+
+#============================================================
+# datafile check
+if [ -s 'out.cgyro.time' ] ; then
+   ncol=`awk '{print NF}' out.cgyro.time | sort -nu | tail -n 1`
+   if [ $ncol -eq 3 ] ; then
+      echo 'ERROR: (CGYRO) Run cgyro_plot -plot text to update number of columns in out.cgyro.time'
+      exit 1
+   fi
+fi
+#============================================================
+
+#==========================================================
+# echo number of tasks, then parse input.cgyro
+#
+python $CGYRO_DIR/bin/cgyro_parse.py
+if [ $? -eq 1 ]
+then
+    exit 1
+fi
+#==========================================================
+
+#==========================================================
+# Energy mesh points
+IN=`grep E_MAX input.cgyro.gen`
+emax=(${IN// / })
+IN=`grep N_ENERGY input.cgyro.gen`
+ne=(${IN// / })
+IN=`grep E_METHOD input.cgyro.gen`
+emethod=(${IN// / })
+
+if [ $emethod -eq 2 ]
+then
+   PREC=0
+   python $GACODE_ROOT/shared/math/gauss_exp_quad.py $emax $ne $PREC
+   echo "INFO: (gauss_exp_quad.py) Generated energy mesh data"
+elif [ $emethod -ne 3 ]
+then
+   data=$GACODE_ROOT/cgyro/tools/egrid/egrid.$ne.${emax%.*}
+   if [ -f $data ]
+   then
+      cp $data out.cgyro.egrid
+   else
+      echo "ERROR: (cgyro) No energy mesh data exists for this resolution."
+      echo $data
+      exit 1
+   fi
+fi
+#==========================================================
+
+#============================================================
+# Init mode
+if [ $INIT_FLAG -eq 1 ]
+then
+   python $GACODE_ROOT/cgyro/bin/cgyro_mpi_grid.py
+   exit 0
+fi
+#============================================================
+
+#===========================================================
+# RUN CGYRO
+#
+# Version stamp
+# NOTE: log all starts and restarts, but NOT test mode
+if [ $TEST_FLAG -eq 0 ]
+then
+   # If there are no restart files, its safe to overwrite the log file
+   PATTERN=(bin.cgyro.restar*)
+   if [ ! -r ${PATTERN[0]} ]; then
+      > out.cgyro.version
+   fi
+
+   # Date with custom formatting
+   date_tag=`date +"%y-%b-%d %T"`
+   version_tag=`gacode_getversion`
+   if [ -f out.cgyro.tag ]
+   then
+      simtime=`tail -1 out.cgyro.tag`
+      simtime=`echo $simtime`
+   else
+      simtime=0.0
+   fi
+   echo "$date_tag [$version_tag][$GACODE_PLATFORM][$simtime]" >> out.cgyro.version
+else
+   NUMA=1
+   MPINUMA=1
+fi
+
+gacode_printversion CGYRO
+
+if [ -f $CGYRO_DIR/src/cgyro ] ; then
+   $GACODE_ROOT/platform/exec/exec.$GACODE_PLATFORM \
+      $SIMDIR $NPROC "$CGYRO_DIR/src/cgyro $TEST_FLAG" $NOMP $NUMA $MPINUMA
+else
+   echo "ERROR: CGYRO executable not found."
+   exit 1
+fi
+#===========================================================
+
+#============================================================
+# Print runfile if test case
+if [ $TEST_FLAG -eq 1 ]
+then
+    python $GACODE_ROOT/shared/bin/osxlist.py out.cgyro.info
+fi
+#============================================================

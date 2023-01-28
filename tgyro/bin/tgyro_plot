@@ -1,0 +1,106 @@
+#!/bin/bash
+#==============================================================================
+# tgyro_plot
+#
+# PURPOSE:
+#  Plotting/listing routines for TGYRO output.
+#==============================================================================
+
+#==============================================================================
+# Syntax validity check and help message
+#
+n=$#
+
+if [ $n -eq 0 ]
+then
+  echo
+  echo "Usage:    tgyro_plot [options]"
+  echo
+  echo "          -p <path>"
+  echo "          Set optional path to simulation directory."
+  echo "          [The default path is the current directory]"
+  echo
+  echo "          -e <simdir>"
+  echo "          Use data in <simdir>."
+  echo 
+  echo "          -ext <plot extension=screen,pdf,png,dump (default screen)>"
+  echo 
+  echo "          -u <units>"
+  echo "          Plot units (0=GB,1=Physical)."
+  echo 
+  echo "          -loc <Legend location: 1,2,3,4>"
+  echo 
+  echo "          -n <iteration number (default -1 = last)>"
+  echo
+  echo "          -dots"
+  echo "          Toggle dot overlay."
+  echo
+  echo "          -notex"
+  echo "          Disable latex fonts"
+  echo
+  echo "Example:"
+  echo
+  echo "   tgyro_plot -dots"
+
+  exit 1
+fi
+#==============================================================================
+
+#==============================================================================
+# Define variables for flag capture
+#
+# Default simulation directory
+LOCDIR=.
+EXT=screen
+SIMROOT=$PWD
+UNITS=0
+DOTS=0
+LOC=1
+N=-1
+TEX=1
+#==============================================================================
+
+#==============================================================================
+# Parse command line options
+#
+while [ $# -gt 0 ] ; do
+  case "$1" in
+
+  -plot) shift ; PLOT_TYPE=$1 ;;
+
+  -e) shift ; LOCDIR=$1 ;;
+
+  -p) shift ; SIMROOT=$1 ;;
+
+  -ext) shift ; EXT=$1 ;;
+
+  -loc) shift ; LOC=$1 ;;
+
+  -u) shift ; UNITS=$1 ;;
+
+  -n) shift ; N=$1 ;;
+
+  -dots) DOTS=1 ;;
+
+  -notex) TEX=0 ;;
+
+  *) echo "ERROR: incorrect tgyro_plot syntax." ; exit 1 ;;
+
+  esac
+  shift
+done
+#==============================================================================
+
+if [ "$LOCDIR" == "." ]
+then
+   LOCDIR=`basename $PWD`
+   cd .. ; SIMROOT=$PWD
+fi
+SIMDIR=$SIMROOT/$LOCDIR
+cd $SIMDIR
+
+PYROOT=$GACODE_ROOT/f2py/pygacode/tgyro
+
+python $PYROOT/plot_notebook.py $SIMDIR $UNITS $EXT $N $LOC $TEX
+
+exit 0
